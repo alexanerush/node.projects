@@ -1,0 +1,15 @@
+{
+  "name": "log-assignment",
+  "version": "1.0.0",
+  "description": "Two Node.js apps: Log Generator and Log Analyzer with a shared Logger module.",
+  "main": "src/generator/index.js",
+  "scripts": {
+    "start:generator": "node src/generator/index.js",
+    "analyze": "node src/analyzer/index.js",
+    "analyze:error": "node src/analyzer/index.js --type error",
+    "analyze:success": "node src/analyzer/index.js --type success",
+    "analyze:warn": "node src/analyzer/index.js --type warn"
+  },
+  "author": "",
+  "license": "MIT"
+}
