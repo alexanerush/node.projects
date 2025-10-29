@@ -3,13 +3,21 @@
   "version": "1.0.0",
   "description": "Two Node.js apps: Log Generator and Log Analyzer with a shared Logger module.",
   "main": "src/generator/index.js",
+  "type": "module",
   "scripts": {
     "start:generator": "node src/generator/index.js",
     "analyze": "node src/analyzer/index.js",
     "analyze:error": "node src/analyzer/index.js --type error",
     "analyze:success": "node src/analyzer/index.js --type success",
-    "analyze:warn": "node src/analyzer/index.js --type warn"
+    "analyze:warn": "node src/analyzer/index.js --type warn",
+    "dev": "node server.js"
   },
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "nanoid": "^5.1.6",
+    "zod": "^4.1.12"
+  }
 }
