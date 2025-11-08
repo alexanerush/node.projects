@@ -167,3 +167,13 @@ POST	    /api/articles           Creates a new article and saves it as a JSON fi
 ## Author
 Developed by Aliaksandra Nerush
 
+
+## Task-3 Deliverables
+
+- Added PUT /api/articles/:id endpoint (update)
+- Added DELETE /api/articles/:id endpoint (remove)
+- Added EditPage.jsx for editing on the frontend
+- Added Delete button in ArticlePage.jsx
+- Updated routing to support /articles/:id/edit
+
+Styled the layout and confirmed all API operations work correctly

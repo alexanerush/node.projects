@@ -10,7 +10,6 @@ async function handleResponse(res) {
 
 export const api = {
   list: () => fetch(`${BASE_URL}/api/articles`).then(handleResponse),
-
   get: (id) => fetch(`${BASE_URL}/api/articles/${id}`).then(handleResponse),
 
   create: (payload) =>
@@ -19,4 +18,21 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }).then(handleResponse),
+
+  update: (id, payload) =>
+    fetch(`${BASE_URL}/api/articles/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then(handleResponse),
+
+  remove: (id) =>
+    fetch(`${BASE_URL}/api/articles/${id}`, {
+      method: "DELETE",
+    }).then((res) => {
+      if (!res.ok) {
+        throw new Error("Failed to delete article");
+      }
+    }),
 };
+

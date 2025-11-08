@@ -3,9 +3,10 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import App from "./App.jsx";
-import ListPage from "./pages/ListPage.jsx";       
-import CreatePage from "./pages/CreatePage.jsx";   
-import ArticlePage from "./pages/ArticlePage.jsx"; 
+import ListPage from "./pages/ListPage.jsx";
+import CreatePage from "./pages/CreatePage.jsx";
+import ArticlePage from "./pages/ArticlePage.jsx";
+import EditPage from "./pages/EditPage.jsx";
 
 import "react-quill/dist/quill.snow.css";
 import "./index.css";
@@ -15,9 +16,10 @@ const router = createBrowserRouter([
     path: "/",
     element: <App />,
     children: [
-      { index: true, element: <ListPage /> },             
-      { path: "create", element: <CreatePage /> },        
-      { path: "articles/:id", element: <ArticlePage /> }, 
+      { index: true, element: <ListPage /> },
+      { path: "create", element: <CreatePage /> },
+      { path: "articles/:id", element: <ArticlePage /> },
+      { path: "articles/:id/edit", element: <EditPage /> },
     ],
   },
 ]);
