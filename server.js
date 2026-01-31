@@ -1,15 +1,18 @@
+// Loads .env variables for DB connection
+import "dotenv/config";
+
 import express from "express";
 import cors from "cors";
 import fs from "fs";
 import path from "path";
-
 import http from "http";
-
 import { WebSocketServer } from "ws";
-
 import multer from "multer";
-
 import crypto from "crypto";
+
+// Imports Sequelize connection + Article model (PostgreSQL storage)
+import { sequelize } from "./db/config.js";
+import { Article } from "./db/models/article.js";
 
 console.log("RUNNING FROM:", new URL(import.meta.url).pathname);
 
@@ -22,43 +25,36 @@ app.use((req, _res, next) => {
   next();
 });
 
-const DATA_DIR = path.resolve("data");
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  console.log("Created data folder:", DATA_DIR);
-}
-
-// Folder where uploaded files 
+// Folder where uploaded files are stored on disk
 const UPLOADS_DIR = path.resolve("uploads");
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   console.log("Created uploads folder:", UPLOADS_DIR);
 }
 
-function articleFilePath(id) {
-  return path.join(DATA_DIR, `${id}.json`);
-}
-
-
+// Serves uploaded files so clicking attachment URLs opens them
 app.use("/uploads", express.static(UPLOADS_DIR));
 
-
+// HTTP server needed so WebSocket can share the same port
 const server = http.createServer(app);
 
-const wss = new WebSocketServer({ server }); // WebSocket server that sends real-time notifications 
+// WebSocket server used for real-time notifications
+const wss = new WebSocketServer({ server });
 
+// Stores which article each client is subscribed to
 const subscribedArticleByClient = new Map();
 
-
+// Sends an event to all clients subscribed to the given articleId
 function notifyArticle(articleId, payload) {
   const msg = JSON.stringify(payload);
   for (const client of wss.clients) {
-    if (client.readyState !== 1) continue; // 1 = open
+    if (client.readyState !== 1) continue; // 1 = OPEN
     const sub = subscribedArticleByClient.get(client);
     if (sub === articleId) client.send(msg);
   }
 }
 
+// Allows clients to subscribe via {"type":"SUBSCRIBE","articleId":"..."}
 wss.on("connection", (ws) => {
   subscribedArticleByClient.set(ws, null);
 
@@ -69,7 +65,7 @@ wss.on("connection", (ws) => {
         subscribedArticleByClient.set(ws, String(data.articleId));
       }
     } catch {
-      // Ignore invalid messages (not required by rubric, just prevents crashes)
+      // ignore
     }
   });
 
@@ -78,6 +74,7 @@ wss.on("connection", (ws) => {
   });
 });
 
+// Allowed file types: images + PDF only
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -86,6 +83,7 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
 ]);
 
+// Multer config to accept multipart/form-data uploads and save to disk
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -94,12 +92,10 @@ const upload = multer({
       cb(null, `${Date.now()}-${crypto.randomUUID()}${ext}`);
     },
   }),
-  limits: { fileSize: 15 * 1024 * 1024 }, 
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      return cb(
-        new Error("Invalid file type. Only images and PDFs are allowed.")
-      );
+      return cb(new Error("Invalid file type. Only images and PDFs are allowed."));
     }
     cb(null, true);
   },
@@ -111,123 +107,125 @@ app.get("/", (_req, res) => {
   res.send("API is running. Try GET /api/articles");
 });
 
+// Lists articles from PostgreSQL
 app.get("/api/articles", async (_req, res, next) => {
-  console.log("GET /api/articles triggered");
   try {
-    const files = await fs.promises.readdir(DATA_DIR);
-    const items = [];
-    for (const f of files) {
-      if (!f.endsWith(".json")) continue;
-      const filePath = path.join(DATA_DIR, f);
-      const raw = await fs.promises.readFile(filePath, "utf8");
-      const a = JSON.parse(raw);
-      items.push({
-        id: a.id,
+    const items = await Article.findAll({
+      attributes: ["id", "title", "createdAt"],
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Keep same shape the client expects
+    res.json(
+      items.map((a) => ({
+        id: String(a.id),
         title: a.title,
         createdAt: a.createdAt,
-      });
-    }
-    items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    res.json(items);
+      }))
+    );
   } catch (e) {
-    console.error("Error in GET /api/articles:", e);
     next(e);
   }
 });
 
-app.post("/api/articles", async (req, res) => {
-  const { title, content } = req.body;
-  if (!title || !content) {
-    return res.status(400).json({ error: "Title and content are required" });
+// Creates an article in PostgreSQL (attachments start empty array)
+app.post("/api/articles", async (req, res, next) => {
+  try {
+    const { title, content } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ error: "Title and content are required" });
+    }
+
+    const article = await Article.create({
+      title,
+      content,
+      attachments: [],
+    });
+
+    res.status(201).json({
+      id: String(article.id),
+      title: article.title,
+      content: article.content,
+      createdAt: article.createdAt,
+      updatedAt: article.updatedAt,
+      attachments: article.attachments ?? [],
+    });
+  } catch (e) {
+    next(e);
   }
-
-  const article = {
-    id: Date.now().toString(),
-    title,
-    content,
-    createdAt: new Date().toISOString(),
-    attachments: [],
-  };
-
-  const filePath = articleFilePath(article.id);
-  await fs.promises.writeFile(filePath, JSON.stringify(article, null, 2), "utf8");
-  console.log("Saved:", filePath);
-  res.status(201).json(article);
 });
 
+// Gets one article from PostgreSQL
 app.get("/api/articles/:id", async (req, res, next) => {
   try {
-    const file = articleFilePath(req.params.id);
-    const raw = await fs.promises.readFile(file, "utf8");
-    const article = JSON.parse(raw);
+    const article = await Article.findByPk(req.params.id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
 
-    if (!Array.isArray(article.attachments)) {
-      article.attachments = [];
-    }
-
-    res.json(article);
+    res.json({
+      id: String(article.id),
+      title: article.title,
+      content: article.content,
+      createdAt: article.createdAt,
+      updatedAt: article.updatedAt,
+      attachments: Array.isArray(article.attachments) ? article.attachments : [],
+    });
   } catch (e) {
-    if (e.code === "ENOENT")
-      return res.status(404).json({ error: "Article not found" });
     next(e);
   }
 });
 
+// Updates title/content (and optionally attachments) in PostgreSQL
 app.put("/api/articles/:id", async (req, res, next) => {
-  const { id } = req.params;
-  const file = articleFilePath(id);
-
   try {
-    const raw = await fs.promises.readFile(file, "utf8");
-    const existing = JSON.parse(raw);
-
     const { title, content, attachments } = req.body;
-
-    if (!title && !content && !attachments) {
+    if (title === undefined && content === undefined && attachments === undefined) {
       return res.status(400).json({ error: "Nothing to update" });
     }
 
-    const updated = {
-      ...existing,
-      title: title ?? existing.title,
-      content: content ?? existing.content,
-      attachments: Array.isArray(attachments)
+    const article = await Article.findByPk(req.params.id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
+
+    if (title !== undefined) article.title = title;
+    if (content !== undefined) article.content = content;
+
+    if (attachments !== undefined) {
+      article.attachments = Array.isArray(attachments)
         ? attachments
-        : Array.isArray(existing.attachments)
-        ? existing.attachments
-        : [],
-    };
+        : Array.isArray(article.attachments)
+        ? article.attachments
+        : [];
+    }
 
-    await fs.promises.writeFile(file, JSON.stringify(updated, null, 2), "utf8");
+    await article.save();
 
-    notifyArticle(String(id), {
+    // Notifies subscribers that the article was edited
+    notifyArticle(String(article.id), {
       type: "ARTICLE_UPDATED",
-      articleId: String(id),
+      articleId: String(article.id),
       at: new Date().toISOString(),
     });
 
-    res.json(updated);
+    res.json({
+      id: String(article.id),
+      title: article.title,
+      content: article.content,
+      createdAt: article.createdAt,
+      updatedAt: article.updatedAt,
+      attachments: Array.isArray(article.attachments) ? article.attachments : [],
+    });
   } catch (e) {
-    if (e.code === "ENOENT") {
-      return res.status(404).json({ error: "Article not found" });
-    }
     next(e);
   }
 });
 
-
+// Uploads a file and appends it to article.attachments in PostgreSQL
 app.post(
   "/api/articles/:id/attachments",
   upload.single("file"),
   async (req, res, next) => {
-    const { id } = req.params;
-
     try {
-      const file = articleFilePath(id);
-      const raw = await fs.promises.readFile(file, "utf8");
-      const article = JSON.parse(raw);
-
-      if (!Array.isArray(article.attachments)) article.attachments = [];
+      const article = await Article.findByPk(req.params.id);
+      if (!article) return res.status(404).json({ error: "Article not found" });
 
       if (!req.file) {
         return res.status(400).json({ error: "File is required" });
@@ -242,39 +240,33 @@ app.post(
         createdAt: new Date().toISOString(),
       };
 
-      article.attachments.push(attachment);
+      const current = Array.isArray(article.attachments) ? article.attachments : [];
+      article.attachments = [...current, attachment];
 
-      await fs.promises.writeFile(file, JSON.stringify(article, null, 2), "utf8");
+      await article.save();
 
-      notifyArticle(String(id), {
+      // Notifies subscribers that a file was attached
+      notifyArticle(String(article.id), {
         type: "ATTACHMENT_ADDED",
-        articleId: String(id),
+        articleId: String(article.id),
         attachment,
         at: new Date().toISOString(),
       });
 
       res.status(201).json({ ok: true, attachment });
     } catch (e) {
-      if (e.code === "ENOENT") {
-        return res.status(404).json({ error: "Article not found" });
-      }
       next(e);
     }
   }
 );
 
+// Deletes an article from PostgreSQL
 app.delete("/api/articles/:id", async (req, res, next) => {
-  const { id } = req.params;
-  const file = articleFilePath(id);
-
   try {
-    await fs.promises.access(file, fs.constants.F_OK);
-  } catch {
-    return res.status(404).json({ error: "Article not found" });
-  }
+    const article = await Article.findByPk(req.params.id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
 
-  try {
-    await fs.promises.unlink(file);
+    await article.destroy();
     res.status(204).send();
   } catch (e) {
     next(e);
@@ -294,7 +286,7 @@ app.get("/__routes", (_req, res) => {
   res.json(routes);
 });
 
-// Converts upload validation errors into readable 400 responses 
+// Converts upload validation errors into readable responses
 app.use((err, _req, res, _next) => {
   console.error("Server error caught:", err);
 
@@ -315,7 +307,18 @@ app.use((err, _req, res, _next) => {
 
 const PORT = 3000;
 
-server.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
-  console.log(`WebSocket is running at ws://localhost:${PORT}`);
+// Connects to PostgreSQL before starting HTTP + WebSocket server
+async function start() {
+  await sequelize.authenticate();
+  console.log("Connected to database");
+
+  server.listen(PORT, () => {
+    console.log(`Server is running at http://localhost:${PORT}`);
+    console.log(`WebSocket is running at ws://localhost:${PORT}`);
+  });
+}
+
+start().catch((e) => {
+  console.error("Failed to start server:", e);
+  process.exit(1);
 });
