@@ -280,3 +280,71 @@ body{
   font-size: 12px;
   color: var(--muted);
 }
+
+.version-banner{
+  padding: 12px 14px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.version-banner__left{
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.version-select{
+  min-width: 160px;
+}
+
+.version-error{
+  margin-top: 6px;
+}
+
+.article-content{
+  line-height: 1.6;
+  margin-bottom: 32px;
+}
+
+.comment-list{
+  margin-top: 20px;
+}
+
+.comment-empty{
+  margin-top: 10px;
+}
+
+.comment-delete{
+  height: 32px;
+}
+
+/* Fix: input text invisible */
+.input {
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+input, textarea, select {
+  color: var(--ink);
+  background: #fff;
+}
+
+input, textarea {
+  -webkit-text-fill-color: var(--ink);
+}

@@ -13,7 +13,7 @@ import { sequelize } from "./db/config.js";
 import { Article } from "./db/models/article.js";
 import { Comment } from "./db/models/comment.js"; 
 import { Workspace } from "./db/models/workspace.js";
-
+import { ArticleVersion } from "./db/models/articleVersion.js";
 
 console.log("RUNNING FROM:", new URL(import.meta.url).pathname);
 
@@ -35,7 +35,6 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 app.use("/uploads", express.static(UPLOADS_DIR));
 
 const server = http.createServer(app);
-
 const wss = new WebSocketServer({ server });
 
 const subscribedArticleByClient = new Map();
@@ -43,7 +42,7 @@ const subscribedArticleByClient = new Map();
 function notifyArticle(articleId, payload) {
   const msg = JSON.stringify(payload);
   for (const client of wss.clients) {
-    if (client.readyState !== 1) continue; 
+    if (client.readyState !== 1) continue;
     const sub = subscribedArticleByClient.get(client);
     if (sub === articleId) client.send(msg);
   }
@@ -84,7 +83,7 @@ const upload = multer({
       cb(null, `${Date.now()}-${crypto.randomUUID()}${ext}`);
     },
   }),
-  limits: { fileSize: 15 * 1024 * 1024 }, 
+  limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       return cb(new Error("Invalid file type. Only images and PDFs are allowed."));
@@ -104,7 +103,7 @@ app.get("/api/articles", async (req, res, next) => {
     const { workspaceId } = req.query;
 
     const where = {};
-    if (workspaceId) {
+    if (workspaceId !== undefined && workspaceId !== null && workspaceId !== "") {
       where.workspaceId = Number(workspaceId);
     }
 
@@ -140,6 +139,29 @@ app.get("/api/workspaces", async (_req, res, next) => {
         name: w.name,
         createdAt: w.createdAt,
         updatedAt: w.updatedAt,
+      }))
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get("/api/workspaces/:id/articles", async (req, res, next) => {
+  try {
+    const workspaceId = Number(req.params.id);
+
+    const items = await Article.findAll({
+      attributes: ["id", "title", "createdAt", "workspaceId"],
+      where: { workspaceId },
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.json(
+      items.map((a) => ({
+        id: String(a.id),
+        title: a.title,
+        createdAt: a.createdAt,
+        workspaceId: a.workspaceId,
       }))
     );
   } catch (e) {
@@ -199,19 +221,34 @@ app.delete("/api/comments/:commentId", async (req, res, next) => {
   }
 });
 
-
-// Creates an article in PostgreSQL 
+// Creates an article in PostgreSQL
 app.post("/api/articles", async (req, res, next) => {
   try {
-    const { title, content } = req.body;
+    const { title, content, workspaceId } = req.body;
+
     if (!title || !content) {
       return res.status(400).json({ error: "Title and content are required" });
+    }
+
+    if (workspaceId === undefined || workspaceId === null || workspaceId === "") {
+      return res.status(400).json({ error: "workspaceId is required" });
+    }
+
+    const wsId = Number(workspaceId);
+    if (!Number.isFinite(wsId) || wsId <= 0) {
+      return res.status(400).json({ error: "workspaceId must be a positive number" });
+    }
+
+    const ws = await Workspace.findByPk(wsId);
+    if (!ws) {
+      return res.status(400).json({ error: `Workspace not found (id=${wsId})` });
     }
 
     const article = await Article.create({
       title,
       content,
       attachments: [],
+      workspaceId: wsId,
     });
 
     res.status(201).json({
@@ -221,8 +258,10 @@ app.post("/api/articles", async (req, res, next) => {
       createdAt: article.createdAt,
       updatedAt: article.updatedAt,
       attachments: article.attachments ?? [],
+      workspaceId: article.workspaceId,
     });
   } catch (e) {
+    console.error("CREATE ARTICLE ERROR:", e);
     next(e);
   }
 });
@@ -240,12 +279,63 @@ app.get("/api/articles/:id", async (req, res, next) => {
       createdAt: article.createdAt,
       updatedAt: article.updatedAt,
       attachments: Array.isArray(article.attachments) ? article.attachments : [],
+      workspaceId: article.workspaceId,
     });
   } catch (e) {
     next(e);
   }
 });
 
+app.get("/api/articles/:id/versions", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const article = await Article.findByPk(id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
+
+    const versions = await ArticleVersion.findAll({
+      where: { articleId: id },
+      attributes: ["version", "title", "createdAt"],
+      order: [["version", "DESC"]],
+    });
+
+    res.json(
+      versions.map((v) => ({
+        version: v.version,
+        title: v.title,
+        createdAt: v.createdAt,
+      }))
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get("/api/articles/:id/versions/:version", async (req, res, next) => {
+  try {
+    const { id, version } = req.params;
+
+    const article = await Article.findByPk(id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
+
+    const v = await ArticleVersion.findOne({
+      where: { articleId: id, version: Number(version) },
+    });
+
+    if (!v) return res.status(404).json({ error: "Version not found" });
+
+    res.json({
+      articleId: String(v.articleId),
+      version: v.version,
+      title: v.title,
+      content: v.content,
+      createdAt: v.createdAt,
+      updatedAt: v.updatedAt,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
 app.put("/api/articles/:id", async (req, res, next) => {
   try {
@@ -256,6 +346,20 @@ app.put("/api/articles/:id", async (req, res, next) => {
 
     const article = await Article.findByPk(req.params.id);
     if (!article) return res.status(404).json({ error: "Article not found" });
+
+    const lastVersion = await ArticleVersion.findOne({
+      where: { articleId: article.id },
+      order: [["version", "DESC"]],
+    });
+
+    const nextVersion = lastVersion ? lastVersion.version + 1 : 1;
+
+    await ArticleVersion.create({
+      articleId: article.id,
+      version: nextVersion,
+      title: article.title,
+      content: article.content,
+    });
 
     if (title !== undefined) article.title = title;
     if (content !== undefined) article.content = content;
@@ -283,12 +387,12 @@ app.put("/api/articles/:id", async (req, res, next) => {
       createdAt: article.createdAt,
       updatedAt: article.updatedAt,
       attachments: Array.isArray(article.attachments) ? article.attachments : [],
+      workspaceId: article.workspaceId,
     });
   } catch (e) {
     next(e);
   }
 });
-
 
 app.post(
   "/api/articles/:id/attachments",
@@ -353,6 +457,10 @@ app.get("/__routes", (_req, res) => {
     }
   });
   res.json(routes);
+});
+
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "Not found" });
 });
 
 app.use((err, _req, res, _next) => {

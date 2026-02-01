@@ -1,6 +1,6 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "../config.js";
-import { Comment } from "./comment.js"; 
+import { Comment } from "./comment.js";
 
 export const Article = sequelize.define(
   "Article",
@@ -10,6 +10,12 @@ export const Article = sequelize.define(
       autoIncrement: true,
       primaryKey: true,
     },
+
+    workspaceId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+
     title: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -30,7 +36,5 @@ export const Article = sequelize.define(
   }
 );
 
-
 Article.hasMany(Comment, { foreignKey: "articleId", onDelete: "CASCADE" });
-
 Comment.belongsTo(Article, { foreignKey: "articleId" });

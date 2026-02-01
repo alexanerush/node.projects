@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 function formatDate(d) {
   try {
@@ -18,6 +18,9 @@ export default function ListPage() {
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
 
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
   useEffect(() => {
     setLoading(true);
     setErr("");
@@ -28,13 +31,28 @@ export default function ListPage() {
         const list = Array.isArray(ws) ? ws : [];
         setWorkspaces(list);
 
-        if (list.length > 0) {
-          setWorkspaceId(String(list[0].id));
+        const fromUrl = searchParams.get("workspaceId");
+
+        if (fromUrl && list.some((w) => String(w.id) === String(fromUrl))) {
+          setWorkspaceId(String(fromUrl));
+        } else if (list.length > 0) {
+  
+          const first = String(list[0].id);
+          setWorkspaceId(first);
+          navigate(`/?workspaceId=${first}`, { replace: true });
         }
       })
       .catch((e) => setErr(e.message))
       .finally(() => setLoading(false));
+
   }, []);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("workspaceId");
+    if (fromUrl && fromUrl !== workspaceId) {
+      setWorkspaceId(String(fromUrl));
+    }
+  }, [searchParams, workspaceId]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -55,6 +73,13 @@ export default function ListPage() {
     return items.filter((a) => a.title?.toLowerCase().includes(s));
   }, [q, items]);
 
+  const selectValue = workspaceId || String(workspaces[0]?.id ?? "");
+
+  function onWorkspaceChange(nextId) {
+    setWorkspaceId(nextId);
+    navigate(`/?workspaceId=${nextId}`);
+  }
+
   return (
     <div className="wrap">
       <div className="page-head">
@@ -63,11 +88,11 @@ export default function ListPage() {
         <div className="actions">
           <select
             className="input"
-            value={workspaceId}
-            onChange={(e) => setWorkspaceId(e.target.value)}
+            value={selectValue}
+            onChange={(e) => onWorkspaceChange(e.target.value)}
           >
             {workspaces.map((ws) => (
-              <option key={ws.id} value={ws.id}>
+              <option key={ws.id} value={String(ws.id)}>
                 {ws.name}
               </option>
             ))}
@@ -80,10 +105,7 @@ export default function ListPage() {
             onChange={(e) => setQ(e.target.value)}
           />
 
-          <Link
-            className="btn btn-primary"
-            to={`/create?workspaceId=${workspaceId}`}
-          >
+          <Link className="btn btn-primary" to={`/create?workspaceId=${selectValue}`}>
             New Article
           </Link>
         </div>
@@ -95,10 +117,7 @@ export default function ListPage() {
       {!loading && !err && filtered.length === 0 && (
         <div className="empty">
           <p>No articles yet.</p>
-          <Link
-            className="btn btn-primary"
-            to={`/create?workspaceId=${workspaceId}`}
-          >
+          <Link className="btn btn-primary" to={`/create?workspaceId=${selectValue}`}>
             Create the first one
           </Link>
         </div>
@@ -111,9 +130,7 @@ export default function ListPage() {
               <h3 className="article-card__title">
                 <Link to={`/articles/${a.id}`}>{a.title}</Link>
               </h3>
-              {a.createdAt && (
-                <span className="chip">{formatDate(a.createdAt)}</span>
-              )}
+              {a.createdAt && <span className="chip">{formatDate(a.createdAt)}</span>}
             </div>
 
             <div className="article-card__footer">
