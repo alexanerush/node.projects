@@ -1,36 +1,29 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "../config.js";
-import { Comment } from "./comment.js"; 
 
-export const Article = sequelize.define(
-  "Article",
+export const Comment = sequelize.define(
+  "Comment",
   {
     id: {
       type: DataTypes.INTEGER,
       autoIncrement: true,
       primaryKey: true,
     },
-    title: {
+    author: {
       type: DataTypes.STRING,
       allowNull: false,
     },
-    content: {
+    text: {
       type: DataTypes.TEXT,
       allowNull: false,
     },
-    attachments: {
-      type: DataTypes.JSONB,
+    articleId: {
+      type: DataTypes.INTEGER,
       allowNull: false,
-      defaultValue: [],
     },
   },
   {
-    tableName: "articles",
+    tableName: "comments",
     timestamps: true,
   }
 );
-
-
-Article.hasMany(Comment, { foreignKey: "articleId", onDelete: "CASCADE" });
-
-Comment.belongsTo(Article, { foreignKey: "articleId" });

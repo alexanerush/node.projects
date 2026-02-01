@@ -10,6 +10,11 @@ export default function ArticlePage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  const [comments, setComments] = useState([]);
+  const [commentText, setCommentText] = useState("");
+  const [commentAuthor, setCommentAuthor] = useState("");
+  const [commentErr, setCommentErr] = useState("");
+
   const [toast, setToast] = useState("");
   const toastTimerRef = useRef(null);
 
@@ -22,7 +27,7 @@ export default function ArticlePage() {
     toastTimerRef.current = setTimeout(() => setToast(""), 3000);
   }
 
-  
+  // Load article
   useEffect(() => {
     setErr("");
     setLoading(true);
@@ -33,17 +38,23 @@ export default function ArticlePage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // WebSocket subscribe + notifications
+  // Load comments
+  useEffect(() => {
+    fetch(`http://localhost:3000/api/articles/${id}/comments`)
+      .then((r) => r.json())
+      .then((data) => setComments(Array.isArray(data) ? data : []))
+      .catch(() => setComments([]));
+  }, [id]);
+
+  // WebSocket subscribe
   useEffect(() => {
     const ws = new WebSocket("ws://localhost:3000");
 
     ws.onopen = () => {
-      console.log("WS open");
       ws.send(JSON.stringify({ type: "SUBSCRIBE", articleId: id }));
     };
 
     ws.onmessage = (event) => {
-      console.log("WS message:", event.data);
       try {
         const msg = JSON.parse(event.data);
 
@@ -56,28 +67,15 @@ export default function ArticlePage() {
           showToast("New attachment added");
           api.get(id).then(setArticle);
         }
-      } catch {
-
-      }
+      } catch {}
     };
 
-    ws.onerror = (e) => {
-      console.log("WS error:", e);
-    };
-
-    ws.onclose = () => {
-      console.log("WS closed");
-    };
-
-    return () => {
-      ws.close();
-    };
+    return () => ws.close();
   }, [id]);
 
-  // Upload attachment
+  // Upload file
   async function handleUpload(e) {
-    const input = e.target;
-    const file = input.files?.[0];
+    const file = e.target.files?.[0];
     if (!file) return;
 
     setUploadError("");
@@ -107,8 +105,54 @@ export default function ArticlePage() {
       showToast(error.message);
     } finally {
       setUploading(false);
-      input.value = ""; // allow picking same file again
+      e.target.value = "";
     }
+  }
+
+  // Submit comment
+  async function submitComment(e) {
+    e.preventDefault();
+    setCommentErr("");
+
+    if (!commentAuthor.trim() || !commentText.trim()) {
+      setCommentErr("Both fields are required");
+      return;
+    }
+
+    const res = await fetch(
+      `http://localhost:3000/api/articles/${id}/comments`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: commentText,
+          author: commentAuthor,
+        }),
+      }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      setCommentErr(data.error || "Failed to add");
+      return;
+    }
+
+    setComments([...comments, data]);
+    setCommentText("");
+    setCommentAuthor("");
+  }
+
+  // Delete comment
+  async function deleteComment(commentId) {
+    const ok = confirm("Delete comment?");
+    if (!ok) return;
+
+    await fetch(`http://localhost:3000/api/comments/${commentId}`, {
+      method: "DELETE",
+    });
+
+    setComments(comments.filter((c) => c.id !== commentId));
   }
 
   async function onDelete() {
@@ -122,124 +166,128 @@ export default function ArticlePage() {
   }
 
   if (loading) return <p style={{ textAlign: "center" }}>Loading…</p>;
-  if (err) return <p style={{ color: "crimson", textAlign: "center" }}>{err}</p>;
-  if (!article) return <p style={{ textAlign: "center" }}>Not found</p>;
+  if (err) return <p className="error" style={{ textAlign: "center" }}>{err}</p>;
 
   return (
-    <main style={{ maxWidth: 720, margin: "0 auto", padding: "2rem" }}>
+    <main className="wrap">
+
       {/* Toast */}
       {toast && (
-        <div
-          style={{
-            position: "fixed",
-            top: 16,
-            right: 16,
-            background: "#111",
-            color: "white",
-            padding: "10px 14px",
-            borderRadius: 10,
-            boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-            zIndex: 9999,
-            maxWidth: 320,
-          }}
-        >
-          {toast}
-        </div>
+        <div className="toast">{toast}</div>
       )}
 
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
+      {/* HEADER */}
+      <div className="page-head">
         <div>
-          <h2 style={{ marginBottom: 4 }}>{article.title}</h2>
-          <p>
-            <small style={{ opacity: 0.7 }}>
-              {article.createdAt ? new Date(article.createdAt).toLocaleString() : ""}
-            </small>
+          <h2 className="page-title">{article.title}</h2>
+          <p className="muted">
+            {new Date(article.createdAt).toLocaleString()}
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
+        <div className="actions">
+          <button className="btn btn-primary"
             onClick={() => navigate(`/articles/${id}/edit`)}
-            style={{
-              background: "#8b5cf6",
-              border: "none",
-              color: "white",
-              padding: "6px 12px",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
-          >
-            Edit
-          </button>
+          >Edit</button>
 
-          <button
+          <button className="btn btn-danger"
             onClick={onDelete}
-            style={{
-              background: "#f43f5e",
-              border: "none",
-              color: "white",
-              padding: "6px 12px",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
-          >
-            Delete
-          </button>
+          >Delete</button>
         </div>
       </div>
 
-      {/* Attachments */}
-      <section style={{ marginBottom: 24 }}>
-        <h3 style={{ marginBottom: 8 }}>Attachments</h3>
+      {/* ATTACHMENTS */}
+      <section className="section">
+        <h3 className="section-title">Attachments</h3>
 
         <input
           type="file"
           onChange={handleUpload}
           accept="image/*,application/pdf"
-          disabled={uploading}
         />
 
-        {uploading && (
-          <p style={{ opacity: 0.7, marginTop: 8 }}>Uploading…</p>
-        )}
+        {uploading && <p className="muted">Uploading…</p>}
+        {uploadError && <p className="error">{uploadError}</p>}
 
-        {uploadError && (
-          <p style={{ color: "crimson", marginTop: 8 }}>{uploadError}</p>
-        )}
-
-        {article.attachments?.length > 0 ? (
-          <ul style={{ marginTop: 12 }}>
+        {article.attachments.length > 0 ? (
+          <ul className="list">
             {article.attachments.map((att) => (
-              <li key={att.id} style={{ marginBottom: 6 }}>
-                <a
-                  href={`http://localhost:3000${att.url}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: "#2563eb" }}
-                >
+              <li key={att.id}>
+                <a href={`http://localhost:3000${att.url}`} target="_blank">
                   {att.originalName} ({Math.round(att.size / 1024)} KB)
                 </a>
               </li>
             ))}
           </ul>
         ) : (
-          <p style={{ opacity: 0.6, marginTop: 12 }}>No attachments yet</p>
+          <p className="muted">No attachments yet</p>
         )}
       </section>
 
-      {/* Article Content */}
+      {/* ARTICLE CONTENT */}
       <div
-        style={{ lineHeight: 1.6 }}
+        style={{ lineHeight: 1.6, marginBottom: "32px" }}
         dangerouslySetInnerHTML={{ __html: article.content }}
       />
+
+      {/* COMMENTS */}
+      <section className="section">
+        <h3 className="section-title">Comments</h3>
+
+        <form className="form" onSubmit={submitComment}>
+          <input
+            className="input"
+            placeholder="Your name"
+            value={commentAuthor}
+            onChange={(e) => setCommentAuthor(e.target.value)}
+            style={{ color: "var(--ink)" }}
+          />
+
+          <textarea
+            className="textarea"
+            placeholder="Write a comment…"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            style={{ color: "var(--ink)" }}
+          />
+
+          {commentErr && <p className="error">{commentErr}</p>}
+
+          <button className="btn btn-primary" type="submit">
+            Add Comment
+          </button>
+        </form>
+
+        {comments.length > 0 ? (
+          <ul className="list" style={{ marginTop: "20px" }}>
+            {comments.map((c) => (
+              <li key={c.id} className="comment">
+                <div className="comment-head">
+                  <div>
+                    <div className="comment-author">{c.author}</div>
+                    <div className="comment-text">{c.text}</div>
+                    <div className="comment-meta">
+                      {new Date(c.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+
+                  <button
+                    className="btn btn-danger"
+                    style={{ height: "32px" }}
+                    onClick={() => deleteComment(c.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted" style={{ marginTop: "10px" }}>
+            No comments yet
+          </p>
+        )}
+      </section>
     </main>
   );
 }

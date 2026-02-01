@@ -1,4 +1,3 @@
-// Loads .env variables for DB connection
 import "dotenv/config";
 
 import express from "express";
@@ -10,9 +9,11 @@ import { WebSocketServer } from "ws";
 import multer from "multer";
 import crypto from "crypto";
 
-// Imports Sequelize connection + Article model (PostgreSQL storage)
 import { sequelize } from "./db/config.js";
 import { Article } from "./db/models/article.js";
+import { Comment } from "./db/models/comment.js"; 
+import { Workspace } from "./db/models/workspace.js";
+
 
 console.log("RUNNING FROM:", new URL(import.meta.url).pathname);
 
@@ -25,36 +26,29 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Folder where uploaded files are stored on disk
 const UPLOADS_DIR = path.resolve("uploads");
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   console.log("Created uploads folder:", UPLOADS_DIR);
 }
 
-// Serves uploaded files so clicking attachment URLs opens them
 app.use("/uploads", express.static(UPLOADS_DIR));
 
-// HTTP server needed so WebSocket can share the same port
 const server = http.createServer(app);
 
-// WebSocket server used for real-time notifications
 const wss = new WebSocketServer({ server });
 
-// Stores which article each client is subscribed to
 const subscribedArticleByClient = new Map();
 
-// Sends an event to all clients subscribed to the given articleId
 function notifyArticle(articleId, payload) {
   const msg = JSON.stringify(payload);
   for (const client of wss.clients) {
-    if (client.readyState !== 1) continue; // 1 = OPEN
+    if (client.readyState !== 1) continue; 
     const sub = subscribedArticleByClient.get(client);
     if (sub === articleId) client.send(msg);
   }
 }
 
-// Allows clients to subscribe via {"type":"SUBSCRIBE","articleId":"..."}
 wss.on("connection", (ws) => {
   subscribedArticleByClient.set(ws, null);
 
@@ -74,7 +68,6 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Allowed file types: images + PDF only
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -83,7 +76,6 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
 ]);
 
-// Multer config to accept multipart/form-data uploads and save to disk
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -92,7 +84,7 @@ const upload = multer({
       cb(null, `${Date.now()}-${crypto.randomUUID()}${ext}`);
     },
   }),
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
+  limits: { fileSize: 15 * 1024 * 1024 }, 
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       return cb(new Error("Invalid file type. Only images and PDFs are allowed."));
@@ -107,20 +99,27 @@ app.get("/", (_req, res) => {
   res.send("API is running. Try GET /api/articles");
 });
 
-// Lists articles from PostgreSQL
-app.get("/api/articles", async (_req, res, next) => {
+app.get("/api/articles", async (req, res, next) => {
   try {
+    const { workspaceId } = req.query;
+
+    const where = {};
+    if (workspaceId) {
+      where.workspaceId = Number(workspaceId);
+    }
+
     const items = await Article.findAll({
-      attributes: ["id", "title", "createdAt"],
+      attributes: ["id", "title", "createdAt", "workspaceId"],
+      where,
       order: [["createdAt", "DESC"]],
     });
 
-    // Keep same shape the client expects
     res.json(
       items.map((a) => ({
         id: String(a.id),
         title: a.title,
         createdAt: a.createdAt,
+        workspaceId: a.workspaceId,
       }))
     );
   } catch (e) {
@@ -128,7 +127,80 @@ app.get("/api/articles", async (_req, res, next) => {
   }
 });
 
-// Creates an article in PostgreSQL (attachments start empty array)
+app.get("/api/workspaces", async (_req, res, next) => {
+  try {
+    const items = await Workspace.findAll({
+      attributes: ["id", "name", "createdAt", "updatedAt"],
+      order: [["id", "ASC"]],
+    });
+
+    res.json(
+      items.map((w) => ({
+        id: String(w.id),
+        name: w.name,
+        createdAt: w.createdAt,
+        updatedAt: w.updatedAt,
+      }))
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post("/api/articles/:id/comments", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { author, text } = req.body;
+
+    if (!author || !text) {
+      return res.status(400).json({ error: "author and text are required" });
+    }
+
+    const article = await Article.findByPk(id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
+
+    const comment = await Comment.create({ articleId: id, author, text });
+    res.status(201).json(comment);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Lists comments for a specific article
+app.get("/api/articles/:id/comments", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const article = await Article.findByPk(id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
+
+    const comments = await Comment.findAll({
+      where: { articleId: id },
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.json(comments);
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete("/api/comments/:commentId", async (req, res, next) => {
+  try {
+    const { commentId } = req.params;
+
+    const comment = await Comment.findByPk(commentId);
+    if (!comment) return res.status(404).json({ error: "Comment not found" });
+
+    await comment.destroy();
+    res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
+
+// Creates an article in PostgreSQL 
 app.post("/api/articles", async (req, res, next) => {
   try {
     const { title, content } = req.body;
@@ -155,7 +227,7 @@ app.post("/api/articles", async (req, res, next) => {
   }
 });
 
-// Gets one article from PostgreSQL
+
 app.get("/api/articles/:id", async (req, res, next) => {
   try {
     const article = await Article.findByPk(req.params.id);
@@ -174,7 +246,7 @@ app.get("/api/articles/:id", async (req, res, next) => {
   }
 });
 
-// Updates title/content (and optionally attachments) in PostgreSQL
+
 app.put("/api/articles/:id", async (req, res, next) => {
   try {
     const { title, content, attachments } = req.body;
@@ -198,7 +270,6 @@ app.put("/api/articles/:id", async (req, res, next) => {
 
     await article.save();
 
-    // Notifies subscribers that the article was edited
     notifyArticle(String(article.id), {
       type: "ARTICLE_UPDATED",
       articleId: String(article.id),
@@ -218,7 +289,7 @@ app.put("/api/articles/:id", async (req, res, next) => {
   }
 });
 
-// Uploads a file and appends it to article.attachments in PostgreSQL
+
 app.post(
   "/api/articles/:id/attachments",
   upload.single("file"),
@@ -245,7 +316,6 @@ app.post(
 
       await article.save();
 
-      // Notifies subscribers that a file was attached
       notifyArticle(String(article.id), {
         type: "ATTACHMENT_ADDED",
         articleId: String(article.id),
@@ -260,7 +330,6 @@ app.post(
   }
 );
 
-// Deletes an article from PostgreSQL
 app.delete("/api/articles/:id", async (req, res, next) => {
   try {
     const article = await Article.findByPk(req.params.id);
@@ -286,7 +355,6 @@ app.get("/__routes", (_req, res) => {
   res.json(routes);
 });
 
-// Converts upload validation errors into readable responses
 app.use((err, _req, res, _next) => {
   console.error("Server error caught:", err);
 
@@ -307,7 +375,6 @@ app.use((err, _req, res, _next) => {
 
 const PORT = 3000;
 
-// Connects to PostgreSQL before starting HTTP + WebSocket server
 async function start() {
   await sequelize.authenticate();
   console.log("Connected to database");
