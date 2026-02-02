@@ -15,6 +15,9 @@ export function clearToken() {
 }
 
 async function handleResponse(res) {
+
+  if (res.status === 204) return null;
+
   const data = await res.json().catch(() => ({}));
 
   if (res.status === 401) {
@@ -24,20 +27,26 @@ async function handleResponse(res) {
   if (!res.ok) {
     throw new Error(data.error || data.details || res.statusText || "Request failed");
   }
+
   return data;
 }
 
 function request(path, { method = "GET", body, headers } = {}) {
   const token = getToken();
 
+  const finalHeaders = {
+    ...(headers || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  if (body !== undefined) {
+    finalHeaders["Content-Type"] = "application/json";
+  }
+
   return fetch(`${BASE_URL}${path}`, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(headers || {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
+    headers: finalHeaders,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   }).then(handleResponse);
 }
 
@@ -50,13 +59,10 @@ export const authApi = {
     request("/api/auth/login", { method: "POST", body: { email, password } }),
 };
 
-// protected main api
 export const api = {
-  // categories/workspaces
   workspaces: () => request("/api/workspaces"),
   workspaceArticles: (workspaceId) => request(`/api/workspaces/${workspaceId}/articles`),
 
-  // articles
   list: (workspaceId) => {
     const qs = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : "";
     return request(`/api/articles${qs}`);
@@ -68,17 +74,5 @@ export const api = {
 
   update: (id, payload) => request(`/api/articles/${id}`, { method: "PUT", body: payload }),
 
-  remove: (id) =>
-    fetch(`${BASE_URL}/api/articles/${id}`, {
-      method: "DELETE",
-      headers: {
-        ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
-      },
-    }).then((res) => {
-      if (res.status === 401) clearToken();
-      if (!res.ok) throw new Error("Failed to delete article");
-    }),
-
-  // logic protected page
-  getLogic: () => request("/api/logic"),
+  remove: (id) => request(`/api/articles/${id}`, { method: "DELETE" }),
 };
