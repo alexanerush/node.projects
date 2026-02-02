@@ -38,16 +38,16 @@ export default function ListPage() {
 
   useEffect(() => {
     if (!workspaceId) return;
-
+  
     setLoading(true);
     setErr("");
-
-    fetch(`http://localhost:3000/api/workspaces/${workspaceId}/articles`)
+  
+    fetch(`http://localhost:3000/api/articles?workspaceId=${workspaceId}`)
       .then((r) => r.json())
       .then((data) => setItems(Array.isArray(data) ? data : []))
       .catch((e) => setErr(e.message))
       .finally(() => setLoading(false));
-  }, [workspaceId]);
+  }, [workspaceId]);  
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();

@@ -11,7 +11,8 @@
     "analyze:success": "node src/analyzer/index.js --type success",
     "analyze:warn": "node src/analyzer/index.js --type warn",
     "dev": "node server.js",
-    "migrate": "node db/migrate.js"
+    "migrate": "node db/migrate.js",
+    "seed": "node db/seed.js"
   },
   "author": "",
   "license": "MIT",

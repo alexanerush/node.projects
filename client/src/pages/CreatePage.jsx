@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../api";
 import Editor from "../components/Editor";
 
@@ -10,10 +10,22 @@ export default function CreatePage() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const workspaceId = useMemo(() => {
+    const v = new URLSearchParams(location.search).get("workspaceId");
+    return v && /^\d+$/.test(v) ? Number(v) : null;
+  }, [location.search]);
 
   async function onSubmit(e) {
     e.preventDefault();
-    setError(""); setOk("");
+    setError("");
+    setOk("");
+
+    if (!workspaceId) {
+      setError("Workspace is required");
+      return;
+    }
 
     if (!title.trim() || !content.trim()) {
       setError("Title and content are required");
@@ -22,12 +34,13 @@ export default function CreatePage() {
 
     setSaving(true);
     try {
-      const created = await api.create({ title, content }); 
+      const created = await api.create({ title, content, workspaceId });
       setOk("Article created");
-      setTitle(""); setContent("");
+      setTitle("");
+      setContent("");
       navigate(`/articles/${created.id}`);
     } catch (err) {
-      setError(err.message || "Failed to create article");
+      setError(err?.message || "Failed to create article");
     } finally {
       setSaving(false);
     }
@@ -44,7 +57,12 @@ export default function CreatePage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="My new article"
-            style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #cbd5e1" }}
+            style={{
+              width: "100%",
+              padding: 10,
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+            }}
           />
         </label>
 

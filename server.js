@@ -11,9 +11,8 @@ import crypto from "crypto";
 
 import { sequelize } from "./db/config.js";
 import { Article } from "./db/models/article.js";
-import { Comment } from "./db/models/comment.js"; 
+import { Comment } from "./db/models/comment.js";
 import { Workspace } from "./db/models/workspace.js";
-
 
 console.log("RUNNING FROM:", new URL(import.meta.url).pathname);
 
@@ -43,7 +42,7 @@ const subscribedArticleByClient = new Map();
 function notifyArticle(articleId, payload) {
   const msg = JSON.stringify(payload);
   for (const client of wss.clients) {
-    if (client.readyState !== 1) continue; 
+    if (client.readyState !== 1) continue;
     const sub = subscribedArticleByClient.get(client);
     if (sub === articleId) client.send(msg);
   }
@@ -84,7 +83,7 @@ const upload = multer({
       cb(null, `${Date.now()}-${crypto.randomUUID()}${ext}`);
     },
   }),
-  limits: { fileSize: 15 * 1024 * 1024 }, 
+  limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
       return cb(new Error("Invalid file type. Only images and PDFs are allowed."));
@@ -199,11 +198,20 @@ app.delete("/api/comments/:commentId", async (req, res, next) => {
   }
 });
 
-
-// Creates an article in PostgreSQL 
+// Creates an article in PostgreSQL (requires workspaceId)
 app.post("/api/articles", async (req, res, next) => {
   try {
-    const { title, content } = req.body;
+    const { title, content, workspaceId } = req.body;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: "workspaceId is required" });
+    }
+
+    const ws = await Workspace.findByPk(workspaceId);
+    if (!ws) {
+      return res.status(400).json({ error: "Workspace does not exist" });
+    }
+
     if (!title || !content) {
       return res.status(400).json({ error: "Title and content are required" });
     }
@@ -211,6 +219,7 @@ app.post("/api/articles", async (req, res, next) => {
     const article = await Article.create({
       title,
       content,
+      workspaceId,
       attachments: [],
     });
 
@@ -220,13 +229,13 @@ app.post("/api/articles", async (req, res, next) => {
       content: article.content,
       createdAt: article.createdAt,
       updatedAt: article.updatedAt,
+      workspaceId: article.workspaceId,
       attachments: article.attachments ?? [],
     });
   } catch (e) {
     next(e);
   }
 });
-
 
 app.get("/api/articles/:id", async (req, res, next) => {
   try {
@@ -245,7 +254,6 @@ app.get("/api/articles/:id", async (req, res, next) => {
     next(e);
   }
 });
-
 
 app.put("/api/articles/:id", async (req, res, next) => {
   try {
@@ -289,46 +297,41 @@ app.put("/api/articles/:id", async (req, res, next) => {
   }
 });
 
+app.post("/api/articles/:id/attachments", upload.single("file"), async (req, res, next) => {
+  try {
+    const article = await Article.findByPk(req.params.id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
 
-app.post(
-  "/api/articles/:id/attachments",
-  upload.single("file"),
-  async (req, res, next) => {
-    try {
-      const article = await Article.findByPk(req.params.id);
-      if (!article) return res.status(404).json({ error: "Article not found" });
-
-      if (!req.file) {
-        return res.status(400).json({ error: "File is required" });
-      }
-
-      const attachment = {
-        id: crypto.randomUUID(),
-        originalName: req.file.originalname,
-        mimeType: req.file.mimetype,
-        size: req.file.size,
-        url: `/uploads/${req.file.filename}`,
-        createdAt: new Date().toISOString(),
-      };
-
-      const current = Array.isArray(article.attachments) ? article.attachments : [];
-      article.attachments = [...current, attachment];
-
-      await article.save();
-
-      notifyArticle(String(article.id), {
-        type: "ATTACHMENT_ADDED",
-        articleId: String(article.id),
-        attachment,
-        at: new Date().toISOString(),
-      });
-
-      res.status(201).json({ ok: true, attachment });
-    } catch (e) {
-      next(e);
+    if (!req.file) {
+      return res.status(400).json({ error: "File is required" });
     }
+
+    const attachment = {
+      id: crypto.randomUUID(),
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      url: `/uploads/${req.file.filename}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const current = Array.isArray(article.attachments) ? article.attachments : [];
+    article.attachments = [...current, attachment];
+
+    await article.save();
+
+    notifyArticle(String(article.id), {
+      type: "ATTACHMENT_ADDED",
+      articleId: String(article.id),
+      attachment,
+      at: new Date().toISOString(),
+    });
+
+    res.status(201).json({ ok: true, attachment });
+  } catch (e) {
+    next(e);
   }
-);
+});
 
 app.delete("/api/articles/:id", async (req, res, next) => {
   try {
