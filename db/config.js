@@ -1,15 +1,21 @@
 import "dotenv/config";
 import { Sequelize } from "sequelize";
 
+const {
+  DB_NAME = "articles_db",
+  DB_USER = "postgres",
+  DB_PASSWORD,
+  DB_HOST = "localhost",
+  DB_PORT = "5432",
+} = process.env;
 
-export const sequelize = new Sequelize(
-  process.env.DB_NAME || "articles_db",
-  process.env.DB_USER || "postgres",
-  process.env.DB_PASSWORD || "postgres",
-  {
-    host: process.env.DB_HOST || "localhost",
-    port: process.env.DB_PORT || 5432,
-    dialect: "postgres",
-    logging: false,
-  }
-);
+if (!DB_PASSWORD) {
+  throw new Error("DB_PASSWORD is not set. Create .env from .env.example and add password.");
+}
+
+export const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
+  host: DB_HOST,
+  port: Number(DB_PORT),
+  dialect: "postgres",
+  logging: false,
+});
