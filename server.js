@@ -37,7 +37,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
 
 function signToken(user) {
-  return jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
+  return jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, {
     expiresIn: JWT_EXPIRES_IN,
   });
 }
@@ -167,7 +167,7 @@ app.post("/api/auth/register", async (req, res, next) => {
 
     return res.status(201).json({
       ok: true,
-      user: { id: String(user.id), email: user.email },
+      user: { id: String(user.id), email: user.email, role: user.role },
     });
   } catch (e) {
     next(e);
@@ -285,6 +285,8 @@ app.get("/api/articles/:id", async (req, res, next) => {
     const article = await Article.findByPk(req.params.id);
     if (!article) return res.status(404).json({ error: "Article not found" });
 
+    const author = await User.findByPk(article.authorId);
+
     res.json({
       id: String(article.id),
       title: article.title,
@@ -293,6 +295,13 @@ app.get("/api/articles/:id", async (req, res, next) => {
       updatedAt: article.updatedAt,
       attachments: Array.isArray(article.attachments) ? article.attachments : [],
       workspaceId: article.workspaceId,
+      author: author
+        ? {
+            id: String(author.id),
+            email: author.email,
+            role: author.role,
+          }
+        : null,
     });
   } catch (e) {
     next(e);
@@ -350,7 +359,6 @@ app.get("/api/articles/:id/versions/:version", async (req, res, next) => {
   }
 });
 
-// comments list is PUBLIC
 app.get("/api/articles/:id/comments", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -399,6 +407,7 @@ app.post("/api/articles", authRequired, async (req, res, next) => {
       content,
       attachments: [],
       workspaceId: wsId,
+      authorId: req.user.id,
     });
 
     res.status(201).json({
@@ -425,6 +434,12 @@ app.put("/api/articles/:id", authRequired, async (req, res, next) => {
 
     const article = await Article.findByPk(req.params.id);
     if (!article) return res.status(404).json({ error: "Article not found" });
+
+    const isAdmin = req.user.role === "admin";
+    const isAuthor = String(article.authorId) === String(req.user.id);
+    if (!isAdmin && !isAuthor) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const lastVersion = await ArticleVersion.findOne({
       where: { articleId: article.id },
@@ -477,6 +492,12 @@ app.delete("/api/articles/:id", authRequired, async (req, res, next) => {
   try {
     const article = await Article.findByPk(req.params.id);
     if (!article) return res.status(404).json({ error: "Article not found" });
+
+    const isAdmin = req.user.role === "admin";
+    const isAuthor = String(article.authorId) === String(req.user.id);
+    if (!isAdmin && !isAuthor) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     await article.destroy();
     res.status(204).send();

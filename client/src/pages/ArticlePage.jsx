@@ -84,6 +84,7 @@ export default function ArticlePage() {
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
             attachments: Array.isArray(latest?.attachments) ? latest.attachments : [],
+            author: latest?.author ?? null,
           });
         } else {
           const a = await api.get(id);
@@ -275,6 +276,7 @@ export default function ArticlePage() {
   if (err) return <p className="error" style={{ textAlign: "center" }}>{err}</p>;
 
   const attachments = Array.isArray(article?.attachments) ? article.attachments : [];
+  const isAdminArticle = article?.author?.role === "admin";
 
   return (
     <main className="wrap">
@@ -294,11 +296,16 @@ export default function ArticlePage() {
 
       <div className="page-head">
         <div>
-          <h2 className="page-title">{article.title}</h2>
+          <h2 className="page-title">
+            {article.title}
+            {isAdminArticle ? <span style={{ marginLeft: 8 }}>⭐</span> : null}
+          </h2>
+
           <p className="muted">
             {new Date(article.createdAt).toLocaleString()}
             {isOldVersion ? <> · <span className="muted">v{versionParam}</span></> : null}
           </p>
+
           {versionsErr && <p className="error version-error">{versionsErr}</p>}
         </div>
 

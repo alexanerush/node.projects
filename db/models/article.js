@@ -29,6 +29,10 @@ export const Article = sequelize.define(
       allowNull: false,
       defaultValue: [],
     },
+    authorId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+      },      
   },
   {
     tableName: "articles",
