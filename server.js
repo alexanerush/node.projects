@@ -9,11 +9,15 @@ import { WebSocketServer } from "ws";
 import multer from "multer";
 import crypto from "crypto";
 
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
 import { sequelize } from "./db/config.js";
 import { Article } from "./db/models/article.js";
-import { Comment } from "./db/models/comment.js"; 
+import { Comment } from "./db/models/comment.js";
 import { Workspace } from "./db/models/workspace.js";
 import { ArticleVersion } from "./db/models/articleVersion.js";
+import { User } from "./db/models/user.js";
 
 console.log("RUNNING FROM:", new URL(import.meta.url).pathname);
 
@@ -26,6 +30,38 @@ app.use((req, _res, next) => {
   next();
 });
 
+// --------------------
+// JWT helpers
+// --------------------
+const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
+
+function signToken(user) {
+  return jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+  });
+}
+
+function authRequired(req, res, next) {
+  const header = req.headers.authorization || "";
+  const [type, token] = header.split(" ");
+
+  if (type !== "Bearer" || !token) {
+    return res.status(401).json({ error: "Missing token" });
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload;
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+// --------------------
+// Uploads setup
+// --------------------
 const UPLOADS_DIR = path.resolve("uploads");
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -34,6 +70,9 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 
 app.use("/uploads", express.static(UPLOADS_DIR));
 
+// --------------------
+// WebSocket
+// --------------------
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -67,6 +106,9 @@ wss.on("connection", (ws) => {
   });
 });
 
+// --------------------
+// Multer
+// --------------------
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -92,12 +134,81 @@ const upload = multer({
   },
 });
 
+// --------------------
+// Public routes
+// --------------------
 app.get("/__ping", (_req, res) => res.send("pong"));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/", (_req, res) => {
   res.send("API is running. Try GET /api/articles");
 });
 
+// --------------------
+// AUTH (PUBLIC)
+// --------------------
+app.post("/api/auth/register", async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 chars" });
+    }
+
+    const existing = await User.findOne({ where: { email } });
+    if (existing) {
+      return res.status(409).json({ error: "User already exists" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await User.create({ email, passwordHash });
+
+    return res.status(201).json({
+      ok: true,
+      user: { id: String(user.id), email: user.email },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post("/api/auth/login", async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+
+    const token = signToken(user);
+    return res.json({ token });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// --------------------
+// Protected logic page (required by task)
+// --------------------
+app.get("/api/logic", authRequired, (req, res) => {
+  res.json({
+    ok: true,
+    message: "Welcome to protected logic page",
+    user: req.user,
+  });
+});
+
+// --------------------
+// Existing API (PUBLIC READ)
+// --------------------
 app.get("/api/articles", async (req, res, next) => {
   try {
     const { workspaceId } = req.query;
@@ -169,104 +280,6 @@ app.get("/api/workspaces/:id/articles", async (req, res, next) => {
   }
 });
 
-app.post("/api/articles/:id/comments", async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { author, text } = req.body;
-
-    if (!author || !text) {
-      return res.status(400).json({ error: "author and text are required" });
-    }
-
-    const article = await Article.findByPk(id);
-    if (!article) return res.status(404).json({ error: "Article not found" });
-
-    const comment = await Comment.create({ articleId: id, author, text });
-    res.status(201).json(comment);
-  } catch (e) {
-    next(e);
-  }
-});
-
-// Lists comments for a specific article
-app.get("/api/articles/:id/comments", async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
-    const article = await Article.findByPk(id);
-    if (!article) return res.status(404).json({ error: "Article not found" });
-
-    const comments = await Comment.findAll({
-      where: { articleId: id },
-      order: [["createdAt", "DESC"]],
-    });
-
-    res.json(comments);
-  } catch (e) {
-    next(e);
-  }
-});
-
-app.delete("/api/comments/:commentId", async (req, res, next) => {
-  try {
-    const { commentId } = req.params;
-
-    const comment = await Comment.findByPk(commentId);
-    if (!comment) return res.status(404).json({ error: "Comment not found" });
-
-    await comment.destroy();
-    res.status(204).send();
-  } catch (e) {
-    next(e);
-  }
-});
-
-// Creates an article in PostgreSQL
-app.post("/api/articles", async (req, res, next) => {
-  try {
-    const { title, content, workspaceId } = req.body;
-
-    if (!title || !content) {
-      return res.status(400).json({ error: "Title and content are required" });
-    }
-
-    if (workspaceId === undefined || workspaceId === null || workspaceId === "") {
-      return res.status(400).json({ error: "workspaceId is required" });
-    }
-
-    const wsId = Number(workspaceId);
-    if (!Number.isFinite(wsId) || wsId <= 0) {
-      return res.status(400).json({ error: "workspaceId must be a positive number" });
-    }
-
-    const ws = await Workspace.findByPk(wsId);
-    if (!ws) {
-      return res.status(400).json({ error: `Workspace not found (id=${wsId})` });
-    }
-
-    const article = await Article.create({
-      title,
-      content,
-      attachments: [],
-      workspaceId: wsId,
-    });
-
-    res.status(201).json({
-      id: String(article.id),
-      title: article.title,
-      content: article.content,
-      createdAt: article.createdAt,
-      updatedAt: article.updatedAt,
-      attachments: article.attachments ?? [],
-      workspaceId: article.workspaceId,
-    });
-  } catch (e) {
-    console.error("CREATE ARTICLE ERROR:", e);
-    next(e);
-  }
-});
-
-
 app.get("/api/articles/:id", async (req, res, next) => {
   try {
     const article = await Article.findByPk(req.params.id);
@@ -337,7 +350,73 @@ app.get("/api/articles/:id/versions/:version", async (req, res, next) => {
   }
 });
 
-app.put("/api/articles/:id", async (req, res, next) => {
+// comments list is PUBLIC
+app.get("/api/articles/:id/comments", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const article = await Article.findByPk(id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
+
+    const comments = await Comment.findAll({
+      where: { articleId: id },
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.json(comments);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// --------------------
+// Restricted actions (PROTECTED)
+// --------------------
+app.post("/api/articles", authRequired, async (req, res, next) => {
+  try {
+    const { title, content, workspaceId } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({ error: "Title and content are required" });
+    }
+
+    if (workspaceId === undefined || workspaceId === null || workspaceId === "") {
+      return res.status(400).json({ error: "workspaceId is required" });
+    }
+
+    const wsId = Number(workspaceId);
+    if (!Number.isFinite(wsId) || wsId <= 0) {
+      return res.status(400).json({ error: "workspaceId must be a positive number" });
+    }
+
+    const ws = await Workspace.findByPk(wsId);
+    if (!ws) {
+      return res.status(400).json({ error: `Workspace not found (id=${wsId})` });
+    }
+
+    const article = await Article.create({
+      title,
+      content,
+      attachments: [],
+      workspaceId: wsId,
+    });
+
+    res.status(201).json({
+      id: String(article.id),
+      title: article.title,
+      content: article.content,
+      createdAt: article.createdAt,
+      updatedAt: article.updatedAt,
+      attachments: article.attachments ?? [],
+      workspaceId: article.workspaceId,
+    });
+  } catch (e) {
+    console.error("CREATE ARTICLE ERROR:", e);
+    next(e);
+  }
+});
+
+app.put("/api/articles/:id", authRequired, async (req, res, next) => {
   try {
     const { title, content, attachments } = req.body;
     if (title === undefined && content === undefined && attachments === undefined) {
@@ -394,8 +473,21 @@ app.put("/api/articles/:id", async (req, res, next) => {
   }
 });
 
+app.delete("/api/articles/:id", authRequired, async (req, res, next) => {
+  try {
+    const article = await Article.findByPk(req.params.id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
+
+    await article.destroy();
+    res.status(204).send();
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.post(
   "/api/articles/:id/attachments",
+  authRequired,
   upload.single("file"),
   async (req, res, next) => {
     try {
@@ -434,18 +526,42 @@ app.post(
   }
 );
 
-app.delete("/api/articles/:id", async (req, res, next) => {
+app.post("/api/articles/:id/comments", authRequired, async (req, res, next) => {
   try {
-    const article = await Article.findByPk(req.params.id);
+    const { id } = req.params;
+    const { author, text } = req.body;
+
+    if (!author || !text) {
+      return res.status(400).json({ error: "author and text are required" });
+    }
+
+    const article = await Article.findByPk(id);
     if (!article) return res.status(404).json({ error: "Article not found" });
 
-    await article.destroy();
+    const comment = await Comment.create({ articleId: id, author, text });
+    res.status(201).json(comment);
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete("/api/comments/:commentId", authRequired, async (req, res, next) => {
+  try {
+    const { commentId } = req.params;
+
+    const comment = await Comment.findByPk(commentId);
+    if (!comment) return res.status(404).json({ error: "Comment not found" });
+
+    await comment.destroy();
     res.status(204).send();
   } catch (e) {
     next(e);
   }
 });
 
+// --------------------
+// Debug routes
+// --------------------
 app.get("/__routes", (_req, res) => {
   const routes = [];
   (app._router?.stack || []).forEach((layer) => {

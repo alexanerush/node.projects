@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { api } from "../api";
+import { api, getToken } from "../api";
+
+const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 export default function ArticlePage() {
   const { id } = useParams();
@@ -42,7 +44,7 @@ export default function ArticlePage() {
   async function loadVersions() {
     setVersionsErr("");
     try {
-      const r = await fetch(`http://localhost:3000/api/articles/${id}/versions`);
+      const r = await fetch(`${BASE_URL}/api/articles/${id}/versions`);
       const data = await r.json().catch(() => []);
       if (!r.ok) {
         setVersions([]);
@@ -68,9 +70,7 @@ export default function ArticlePage() {
     (async () => {
       try {
         if (isOldVersion) {
-          const r = await fetch(
-            `http://localhost:3000/api/articles/${id}/versions/${versionParam}`
-          );
+          const r = await fetch(`${BASE_URL}/api/articles/${id}/versions/${versionParam}`);
           const data = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(data?.error || "Failed to load version");
           if (cancelled) return;
@@ -107,7 +107,7 @@ export default function ArticlePage() {
       setComments([]);
       return;
     }
-    fetch(`http://localhost:3000/api/articles/${id}/comments`)
+    fetch(`${BASE_URL}/api/articles/${id}/comments`)
       .then((r) => r.json())
       .then((data) => setComments(Array.isArray(data) ? data : []))
       .catch(() => setComments([]));
@@ -165,10 +165,18 @@ export default function ArticlePage() {
     form.append("file", file);
 
     try {
-      const res = await fetch(
-        `http://localhost:3000/api/articles/${id}/attachments`,
-        { method: "POST", body: form }
-      );
+      const token = getToken();
+      if (!token) {
+        setUploadError("Missing token");
+        showToast("Missing token");
+        return;
+      }
+
+      const res = await fetch(`${BASE_URL}/api/articles/${id}/attachments`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
 
       const data = await res.json().catch(() => ({}));
 
@@ -198,16 +206,26 @@ export default function ArticlePage() {
       return;
     }
 
-    const res = await fetch(`http://localhost:3000/api/articles/${id}/comments`, {
+    const token = getToken();
+    if (!token) {
+      setCommentErr("Missing token");
+      showToast("Missing token");
+      return;
+    }
+
+    const res = await fetch(`${BASE_URL}/api/articles/${id}/comments`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({
         text: commentText,
         author: commentAuthor,
       }),
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
       setCommentErr(data.error || "Failed to add");
@@ -223,9 +241,22 @@ export default function ArticlePage() {
     const ok = confirm("Delete comment?");
     if (!ok) return;
 
-    await fetch(`http://localhost:3000/api/comments/${commentId}`, {
+    const token = getToken();
+    if (!token) {
+      showToast("Missing token");
+      return;
+    }
+
+    const res = await fetch(`${BASE_URL}/api/comments/${commentId}`, {
       method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
     });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.error || "Failed to delete");
+      return;
+    }
 
     setComments(comments.filter((c) => c.id !== commentId));
   }
@@ -316,13 +347,39 @@ export default function ArticlePage() {
 
         {attachments.length > 0 ? (
           <ul className="list">
-            {attachments.map((att) => (
-              <li key={att.id}>
-                <a href={`http://localhost:3000${att.url}`} target="_blank" rel="noreferrer">
-                  {att.originalName} ({Math.round(att.size / 1024)} KB)
-                </a>
-              </li>
-            ))}
+            {attachments.map((att) => {
+              const fileUrl = `${BASE_URL}${att.url}`;
+              const isImage = typeof att.mimeType === "string" && att.mimeType.startsWith("image/");
+              const isPdf = att.mimeType === "application/pdf";
+
+              return (
+                <li key={att.id} style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    <a href={fileUrl} target="_blank" rel="noreferrer">
+                      {att.originalName} ({Math.round(att.size / 1024)} KB)
+                    </a>
+
+                    {isPdf && (
+                      <a className="btn btn-secondary" href={fileUrl} target="_blank" rel="noreferrer">
+                        Open PDF
+                      </a>
+                    )}
+                  </div>
+
+                  {isImage && (
+                    <div style={{ marginTop: 10 }}>
+                      <a href={fileUrl} target="_blank" rel="noreferrer">
+                        <img
+                          src={fileUrl}
+                          alt={att.originalName}
+                          style={{ maxWidth: "100%", borderRadius: 12, boxShadow: "var(--shadow)" }}
+                        />
+                      </a>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="muted">No attachments yet</p>
