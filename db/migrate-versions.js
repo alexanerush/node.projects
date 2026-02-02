@@ -3,13 +3,13 @@ import { sequelize } from "./config.js";
 import { DataTypes } from "sequelize";
 
 async function migrate() {
-  const qi = sequelize.getQueryInterface();
+  const queryInterface = sequelize.getQueryInterface();
 
-  const tables = await qi.showAllTables();
+  const tables = await queryInterface.showAllTables();
   const hasTable = tables.map(String).includes("article_versions");
 
   if (!hasTable) {
-    await qi.createTable("article_versions", {
+    await queryInterface.createTable("article_versions", {
       id: {
         type: DataTypes.INTEGER,
         autoIncrement: true,
@@ -47,10 +47,14 @@ async function migrate() {
       },
     });
 
-    await qi.addIndex("article_versions", ["articleId", "version"], {
-      unique: true,
-      name: "article_versions_articleId_version_unique",
-    });
+    await queryInterface.addIndex(
+      "article_versions",
+      ["articleId", "version"],
+      {
+        unique: true,
+        name: "article_versions_articleId_version_unique",
+      }
+    );
 
     console.log("article_versions created");
   } else {

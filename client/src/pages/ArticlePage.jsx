@@ -165,10 +165,10 @@ export default function ArticlePage() {
     form.append("file", file);
 
     try {
-      const res = await fetch(
-        `http://localhost:3000/api/articles/${id}/attachments`,
-        { method: "POST", body: form }
-      );
+      const res = await fetch(`http://localhost:3000/api/articles/${id}/attachments`, {
+        method: "POST",
+        body: form,
+      });
 
       const data = await res.json().catch(() => ({}));
 
@@ -266,7 +266,12 @@ export default function ArticlePage() {
           <h2 className="page-title">{article.title}</h2>
           <p className="muted">
             {new Date(article.createdAt).toLocaleString()}
-            {isOldVersion ? <> · <span className="muted">v{versionParam}</span></> : null}
+            {isOldVersion ? (
+              <>
+                {" "}
+                · <span className="muted">v{versionParam}</span>
+              </>
+            ) : null}
           </p>
           {versionsErr && <p className="error version-error">{versionsErr}</p>}
         </div>
@@ -285,18 +290,26 @@ export default function ArticlePage() {
             ))}
           </select>
 
-          <button
-            className="btn btn-primary"
-            onClick={() => navigate(`/articles/${id}/edit`)}
-            disabled={isOldVersion}
-            title={isOldVersion ? "Old versions are read-only" : "Edit"}
-          >
-            Edit
-          </button>
+          {!isOldVersion && (
+            <>
+              <button
+                className="btn btn-primary"
+                onClick={() => navigate(`/articles/${id}/edit`)}
+              >
+                Edit
+              </button>
 
-          <button className="btn btn-danger" onClick={onDelete} disabled={isOldVersion}>
-            Delete
-          </button>
+              <button className="btn btn-danger" onClick={onDelete}>
+                Delete
+              </button>
+            </>
+          )}
+
+          {isOldVersion && (
+            <div className="muted" style={{ marginTop: 8 }}>
+              This is an older version — editing is disabled.
+            </div>
+          )}
         </div>
       </div>
 
@@ -318,7 +331,11 @@ export default function ArticlePage() {
           <ul className="list">
             {attachments.map((att) => (
               <li key={att.id}>
-                <a href={`http://localhost:3000${att.url}`} target="_blank" rel="noreferrer">
+                <a
+                  href={`http://localhost:3000${att.url}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   {att.originalName} ({Math.round(att.size / 1024)} KB)
                 </a>
               </li>

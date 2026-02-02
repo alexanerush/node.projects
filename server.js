@@ -11,7 +11,7 @@ import crypto from "crypto";
 
 import { sequelize } from "./db/config.js";
 import { Article } from "./db/models/article.js";
-import { Comment } from "./db/models/comment.js"; 
+import { Comment } from "./db/models/comment.js";
 import { Workspace } from "./db/models/workspace.js";
 import { ArticleVersion } from "./db/models/articleVersion.js";
 
@@ -148,11 +148,11 @@ app.get("/api/workspaces", async (_req, res, next) => {
 
 app.get("/api/workspaces/:id/articles", async (req, res, next) => {
   try {
-    const workspaceId = Number(req.params.id);
+    const workspaceIdNum = Number(req.params.id);
 
     const items = await Article.findAll({
       attributes: ["id", "title", "createdAt", "workspaceId"],
-      where: { workspaceId },
+      where: { workspaceId: workspaceIdNum },
       order: [["createdAt", "DESC"]],
     });
 
@@ -234,21 +234,21 @@ app.post("/api/articles", async (req, res, next) => {
       return res.status(400).json({ error: "workspaceId is required" });
     }
 
-    const wsId = Number(workspaceId);
-    if (!Number.isFinite(wsId) || wsId <= 0) {
+    const workspaceIdNum = Number(workspaceId);
+    if (!Number.isFinite(workspaceIdNum) || workspaceIdNum <= 0) {
       return res.status(400).json({ error: "workspaceId must be a positive number" });
     }
 
-    const ws = await Workspace.findByPk(wsId);
-    if (!ws) {
-      return res.status(400).json({ error: `Workspace not found (id=${wsId})` });
+    const workspace = await Workspace.findByPk(workspaceIdNum);
+    if (!workspace) {
+      return res.status(400).json({ error: `Workspace not found (id=${workspaceIdNum})` });
     }
 
     const article = await Article.create({
       title,
       content,
       attachments: [],
-      workspaceId: wsId,
+      workspaceId: workspaceIdNum,
     });
 
     res.status(201).json({
@@ -265,7 +265,6 @@ app.post("/api/articles", async (req, res, next) => {
     next(e);
   }
 });
-
 
 app.get("/api/articles/:id", async (req, res, next) => {
   try {
@@ -318,19 +317,19 @@ app.get("/api/articles/:id/versions/:version", async (req, res, next) => {
     const article = await Article.findByPk(id);
     if (!article) return res.status(404).json({ error: "Article not found" });
 
-    const v = await ArticleVersion.findOne({
+    const articleVersion = await ArticleVersion.findOne({
       where: { articleId: id, version: Number(version) },
     });
 
-    if (!v) return res.status(404).json({ error: "Version not found" });
+    if (!articleVersion) return res.status(404).json({ error: "Version not found" });
 
     res.json({
-      articleId: String(v.articleId),
-      version: v.version,
-      title: v.title,
-      content: v.content,
-      createdAt: v.createdAt,
-      updatedAt: v.updatedAt,
+      articleId: String(articleVersion.articleId),
+      version: articleVersion.version,
+      title: articleVersion.title,
+      content: articleVersion.content,
+      createdAt: articleVersion.createdAt,
+      updatedAt: articleVersion.updatedAt,
     });
   } catch (e) {
     next(e);
@@ -394,45 +393,41 @@ app.put("/api/articles/:id", async (req, res, next) => {
   }
 });
 
-app.post(
-  "/api/articles/:id/attachments",
-  upload.single("file"),
-  async (req, res, next) => {
-    try {
-      const article = await Article.findByPk(req.params.id);
-      if (!article) return res.status(404).json({ error: "Article not found" });
+app.post("/api/articles/:id/attachments", upload.single("file"), async (req, res, next) => {
+  try {
+    const article = await Article.findByPk(req.params.id);
+    if (!article) return res.status(404).json({ error: "Article not found" });
 
-      if (!req.file) {
-        return res.status(400).json({ error: "File is required" });
-      }
-
-      const attachment = {
-        id: crypto.randomUUID(),
-        originalName: req.file.originalname,
-        mimeType: req.file.mimetype,
-        size: req.file.size,
-        url: `/uploads/${req.file.filename}`,
-        createdAt: new Date().toISOString(),
-      };
-
-      const current = Array.isArray(article.attachments) ? article.attachments : [];
-      article.attachments = [...current, attachment];
-
-      await article.save();
-
-      notifyArticle(String(article.id), {
-        type: "ATTACHMENT_ADDED",
-        articleId: String(article.id),
-        attachment,
-        at: new Date().toISOString(),
-      });
-
-      res.status(201).json({ ok: true, attachment });
-    } catch (e) {
-      next(e);
+    if (!req.file) {
+      return res.status(400).json({ error: "File is required" });
     }
+
+    const attachment = {
+      id: crypto.randomUUID(),
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      url: `/uploads/${req.file.filename}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    const current = Array.isArray(article.attachments) ? article.attachments : [];
+    article.attachments = [...current, attachment];
+
+    await article.save();
+
+    notifyArticle(String(article.id), {
+      type: "ATTACHMENT_ADDED",
+      articleId: String(article.id),
+      attachment,
+      at: new Date().toISOString(),
+    });
+
+    res.status(201).json({ ok: true, attachment });
+  } catch (e) {
+    next(e);
   }
-);
+});
 
 app.delete("/api/articles/:id", async (req, res, next) => {
   try {
