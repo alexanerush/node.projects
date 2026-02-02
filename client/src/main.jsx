@@ -12,6 +12,8 @@ import LoginPage from "./pages/LoginPage.jsx";
 import RegisterPage from "./pages/RegisterPage.jsx";
 import LogicPage from "./pages/LogicPage.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
+import UsersPage from "./pages/UsersPage.jsx";
+
 
 import "react-quill/dist/quill.snow.css";
 import "./index.css";
@@ -19,6 +21,7 @@ import "./index.css";
 const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/register", element: <RegisterPage /> },
+  
 
   {
     path: "/",
@@ -29,6 +32,8 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <ListPage /> },
+      { path: "users", element: <UsersPage /> },
+
       {
         path: "create",
         element: (

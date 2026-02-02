@@ -14,6 +14,18 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+export function getMe() {
+  const token = getToken();
+  if (!token) return null;
+
+  try {
+    const payload = token.split(".")[1];
+    return JSON.parse(atob(payload));
+  } catch {
+    return null;
+  }
+}
+
 async function handleResponse(res) {
   const data = await res.json().catch(() => ({}));
 
@@ -52,7 +64,7 @@ export const authApi = {
 
 // protected main api
 export const api = {
-  // categories/workspaces
+
   workspaces: () => request("/api/workspaces"),
   workspaceArticles: (workspaceId) => request(`/api/workspaces/${workspaceId}/articles`),
 
@@ -81,4 +93,13 @@ export const api = {
 
   // logic protected page
   getLogic: () => request("/api/logic"),
+};
+
+export const usersApi = {
+  list: () => request("/api/users"),
+  setRole: (id, role) =>
+    request(`/api/users/${id}/role`, {
+      method: "PATCH",
+      body: { role },
+    }),
 };

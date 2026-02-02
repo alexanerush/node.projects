@@ -30,9 +30,9 @@ app.use((req, _res, next) => {
   next();
 });
 
-// --------------------
+// -------------
 // JWT helpers
-// --------------------
+// -------------
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
 
@@ -60,8 +60,38 @@ function authRequired(req, res, next) {
 }
 
 // --------------------
-// Uploads setup
+// Permissions helpers
 // --------------------
+async function getArticleOr404(req, res) {
+  const article = await Article.findByPk(req.params.id);
+  if (!article) {
+    res.status(404).json({ error: "Article not found" });
+    return null;
+  }
+  return article;
+}
+
+function requireAdminOrAuthor(req, res, article) {
+  const isAdmin = req.user?.role === "admin";
+  const isAuthor = String(article.authorId) === String(req.user?.id);
+
+  if (!isAdmin && !isAuthor) {
+    res.status(403).json({ error: "Forbidden" });
+    return false;
+  }
+  return true;
+}
+
+function adminRequired(req, res, next) {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ error: "Admin only" });
+  }
+  next();
+}
+
+// -------------
+// Uploads setup
+// --------------
 const UPLOADS_DIR = path.resolve("uploads");
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -70,9 +100,9 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 
 app.use("/uploads", express.static(UPLOADS_DIR));
 
-// --------------------
+// -----------
 // WebSocket
-// --------------------
+// ------------
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -106,9 +136,9 @@ wss.on("connection", (ws) => {
   });
 });
 
-// --------------------
+// ----------
 // Multer
-// --------------------
+// ----------
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -134,18 +164,14 @@ const upload = multer({
   },
 });
 
-// --------------------
-// Public routes
-// --------------------
+
 app.get("/__ping", (_req, res) => res.send("pong"));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/", (_req, res) => {
   res.send("API is running. Try GET /api/articles");
 });
 
-// --------------------
-// AUTH (PUBLIC)
-// --------------------
+
 app.post("/api/auth/register", async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -196,7 +222,7 @@ app.post("/api/auth/login", async (req, res, next) => {
 });
 
 // --------------------
-// Protected logic page (required by task)
+// Protected logic page 
 // --------------------
 app.get("/api/logic", authRequired, (req, res) => {
   res.json({
@@ -206,9 +232,61 @@ app.get("/api/logic", authRequired, (req, res) => {
   });
 });
 
-// --------------------
-// Existing API (PUBLIC READ)
-// --------------------
+// ----------------
+// User management 
+// -----------------
+app.get("/api/users", authRequired, adminRequired, async (_req, res, next) => {
+  try {
+    const users = await User.findAll({
+      attributes: ["id", "email", "role", "createdAt", "updatedAt"],
+      order: [["id", "ASC"]],
+    });
+
+    res.json(
+      users.map((u) => ({
+        id: String(u.id),
+        email: u.email,
+        role: u.role,
+        createdAt: u.createdAt,
+        updatedAt: u.updatedAt,
+      }))
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.patch("/api/users/:id/role", authRequired, adminRequired, async (req, res, next) => {
+  try {
+    const { role } = req.body;
+
+    if (!role || !["admin", "user"].includes(String(role))) {
+      return res.status(400).json({ error: "role must be 'admin' or 'user'" });
+    }
+
+    const user = await User.findByPk(req.params.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // safety: prevent admin from removing own admin role
+    if (String(user.id) === String(req.user.id) && role !== "admin") {
+      return res.status(400).json({ error: "You cannot remove your own admin role" });
+    }
+
+    user.role = role;
+    await user.save();
+
+    res.json({
+      ok: true,
+      user: { id: String(user.id), email: user.email, role: user.role },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// -------------
+// Existing API 
+// --------------
 app.get("/api/articles", async (req, res, next) => {
   try {
     const { workspaceId } = req.query;
@@ -378,7 +456,7 @@ app.get("/api/articles/:id/comments", async (req, res, next) => {
 });
 
 // --------------------
-// Restricted actions (PROTECTED)
+// Restricted actions 
 // --------------------
 app.post("/api/articles", authRequired, async (req, res, next) => {
   try {
@@ -432,14 +510,10 @@ app.put("/api/articles/:id", authRequired, async (req, res, next) => {
       return res.status(400).json({ error: "Nothing to update" });
     }
 
-    const article = await Article.findByPk(req.params.id);
-    if (!article) return res.status(404).json({ error: "Article not found" });
+    const article = await getArticleOr404(req, res);
+    if (!article) return;
 
-    const isAdmin = req.user.role === "admin";
-    const isAuthor = String(article.authorId) === String(req.user.id);
-    if (!isAdmin && !isAuthor) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
+    if (!requireAdminOrAuthor(req, res, article)) return;
 
     const lastVersion = await ArticleVersion.findOne({
       where: { articleId: article.id },
@@ -490,14 +564,10 @@ app.put("/api/articles/:id", authRequired, async (req, res, next) => {
 
 app.delete("/api/articles/:id", authRequired, async (req, res, next) => {
   try {
-    const article = await Article.findByPk(req.params.id);
-    if (!article) return res.status(404).json({ error: "Article not found" });
+    const article = await getArticleOr404(req, res);
+    if (!article) return;
 
-    const isAdmin = req.user.role === "admin";
-    const isAuthor = String(article.authorId) === String(req.user.id);
-    if (!isAdmin && !isAuthor) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
+    if (!requireAdminOrAuthor(req, res, article)) return;
 
     await article.destroy();
     res.status(204).send();
@@ -512,8 +582,10 @@ app.post(
   upload.single("file"),
   async (req, res, next) => {
     try {
-      const article = await Article.findByPk(req.params.id);
-      if (!article) return res.status(404).json({ error: "Article not found" });
+      const article = await getArticleOr404(req, res);
+      if (!article) return;
+
+      if (!requireAdminOrAuthor(req, res, article)) return;
 
       if (!req.file) {
         return res.status(400).json({ error: "File is required" });
@@ -572,6 +644,11 @@ app.delete("/api/comments/:commentId", authRequired, async (req, res, next) => {
 
     const comment = await Comment.findByPk(commentId);
     if (!comment) return res.status(404).json({ error: "Comment not found" });
+
+    const article = await Article.findByPk(comment.articleId);
+    if (!article) return res.status(404).json({ error: "Article not found" });
+
+    if (!requireAdminOrAuthor(req, res, article)) return;
 
     await comment.destroy();
     res.status(204).send();

@@ -278,6 +278,23 @@ export default function ArticlePage() {
   const attachments = Array.isArray(article?.attachments) ? article.attachments : [];
   const isAdminArticle = article?.author?.role === "admin";
 
+  // ---- UI permissions (hide buttons for non-author/non-admin) ----
+  let me = null;
+  try {
+    const token = getToken();
+    if (token) me = JSON.parse(atob(token.split(".")[1]));
+  } catch {
+    me = null;
+  }
+
+  const canEdit =
+    !isOldVersion &&
+    !!me &&
+    (me.role === "admin" || String(me.id) === String(article?.author?.id));
+
+  const canDelete = canEdit;
+  const canManage = canEdit; // attachments + comment delete
+
   return (
     <main className="wrap">
       {toast && <div className="toast">{toast}</div>}
@@ -323,31 +340,39 @@ export default function ArticlePage() {
             ))}
           </select>
 
-          <button
-            className="btn btn-primary"
-            onClick={() => navigate(`/articles/${id}/edit`)}
-            disabled={isOldVersion}
-            title={isOldVersion ? "Old versions are read-only" : "Edit"}
-          >
-            Edit
-          </button>
+          {canEdit && (
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate(`/articles/${id}/edit`)}
+              disabled={isOldVersion}
+              title={isOldVersion ? "Old versions are read-only" : "Edit"}
+            >
+              Edit
+            </button>
+          )}
 
-          <button className="btn btn-danger" onClick={onDelete} disabled={isOldVersion}>
-            Delete
-          </button>
+          {canDelete && (
+            <button className="btn btn-danger" onClick={onDelete} disabled={isOldVersion}>
+              Delete
+            </button>
+          )}
         </div>
       </div>
 
       <section className="section">
         <h3 className="section-title">Attachments</h3>
 
-        <input
-          type="file"
-          onChange={handleUpload}
-          accept="image/*,application/pdf"
-          disabled={isOldVersion || uploading}
-          title={isOldVersion ? "Old versions are read-only" : "Upload attachment"}
-        />
+        {canManage ? (
+          <input
+            type="file"
+            onChange={handleUpload}
+            accept="image/*,application/pdf"
+            disabled={isOldVersion || uploading}
+            title={isOldVersion ? "Old versions are read-only" : "Upload attachment"}
+          />
+        ) : (
+          <p className="muted">Only author or admin can upload attachments.</p>
+        )}
 
         {uploading && <p className="muted">Uploading…</p>}
         {uploadError && <p className="error">{uploadError}</p>}
@@ -439,12 +464,14 @@ export default function ArticlePage() {
                         </div>
                       </div>
 
-                      <button
-                        className="btn btn-danger comment-delete"
-                        onClick={() => deleteComment(c.id)}
-                      >
-                        Delete
-                      </button>
+                      {canManage && (
+                        <button
+                          className="btn btn-danger comment-delete"
+                          onClick={() => deleteComment(c.id)}
+                        >
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </li>
                 ))}

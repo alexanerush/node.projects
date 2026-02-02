@@ -1,9 +1,10 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import "./App.css";
-import { clearToken } from "./api";
+import { clearToken, getMe } from "./api";
 
 export default function App() {
   const nav = useNavigate();
+  const me = getMe();
 
   function onLogout() {
     clearToken();
@@ -15,6 +16,8 @@ export default function App() {
       <header style={{ display: "flex", gap: 16, marginBottom: 24, alignItems: "center" }}>
         <NavLink to="/" end>Articles</NavLink>
         <NavLink to="/create?workspaceId=1">New Article</NavLink>
+
+        {me?.role === "admin" && <NavLink to="/users">Users</NavLink>}
 
         <div style={{ marginLeft: "auto" }}>
           <button type="button" onClick={onLogout}>
